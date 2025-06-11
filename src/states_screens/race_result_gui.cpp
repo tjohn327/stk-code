@@ -24,6 +24,7 @@
 #include "states_screens/dialogs/network_name_dialog.hpp"
 #include "utils/string_utils.hpp"
 #include "network/network_string.hpp"
+#include "network/protocol.hpp"
 #include "network/stk_host.hpp"
 #include "network/protocols/lobby_protocol.hpp"
 #include "challenges/challenge_status.hpp"
@@ -466,9 +467,9 @@ void RaceResultGUI::eventCallback(GUIEngine::Widget* widget,
                                   g_network_demo_current_name.c_str());
                         
                         // Send demo name to server for race result storage
-                        NetworkString* demo_name_msg = getNetworkString(1 + name.size() * 4);
+                        NetworkString* demo_name_msg = new NetworkString(PROTOCOL_LOBBY_ROOM, 1 + name.size() * 4);
                         demo_name_msg->setSynchronous(true);
-                        demo_name_msg->addUInt8(LE_DEMO_NAME);
+                        demo_name_msg->addUInt8(LobbyProtocol::LE_DEMO_NAME);
                         demo_name_msg->encodeString(name);
                         STKHost::get()->sendToServer(demo_name_msg, true);
                         delete demo_name_msg;
