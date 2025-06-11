@@ -25,6 +25,7 @@
 #include <unordered_map>
 
 class Server;
+class NetworkNameDialog;
 class SocketAddress;
 
 namespace GUIEngine { class CheckBoxWidget; class ButtonWidget;
@@ -59,6 +60,12 @@ private:
 
     /** Save the previous successfully connected server name. */
     core::stringw m_entered_server_name;
+    
+    /** Temporary name entered in demo mode. */
+    core::stringw m_demo_name;
+    
+    /** Flag to track if we're waiting for name input in demo mode. */
+    bool m_waiting_for_demo_name;
 
     /** Icon for unread news. */
     int              m_icon_red_dot;
@@ -102,6 +109,11 @@ public:
 
     void setEnteredServerName(const core::stringw& name)
                                               { m_entered_server_name = name; }
+                                              
+private:
+    void proceedWithConnection();
+    void onDemoNameEntered(const core::stringw& name);
+    void onDemoNameCancelled();
 };
 
 #endif

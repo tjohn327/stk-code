@@ -145,6 +145,7 @@ ServerLobby::ServerLobby() : LobbyProtocol()
     m_client_server_host_id.store(0);
     m_lobby_players.store(0);
     m_current_ai_count.store(0);
+    m_race_results_stored = true;
     std::vector<int> all_t =
         track_manager->getTracksInGroup("standard");
     std::vector<int> all_arenas =
@@ -2355,6 +2356,19 @@ void ServerLobby::checkRaceFinished()
         ranking_changes_indication = 1;
     m_result_ns->addUInt8(ranking_changes_indication);
 
+    // Store race results if database is configured (regardless of ranked mode)
+    // In demo mode, delay storage until new name is received
+    if (UserConfigParams::m_network_demo_mode)
+    {
+        Log::info("ServerLobby", "Demo mode: deferring race result storage until new name received");
+        m_race_results_stored = false;
+    }
+    else
+    {
+        storeRaceResults();
+        m_race_results_stored = true;
+    }
+
     if (ServerConfig::m_ranked)
     {
         computeNewRankings();
@@ -2362,6 +2376,102 @@ void ServerLobby::checkRaceFinished()
     }
     m_state.store(WAIT_FOR_RACE_STOPPED);
 }   // checkRaceFinished
+
+//-----------------------------------------------------------------------------
+/** Store race results to database if configured
+ */
+void ServerLobby::storeRaceResults()
+{
+    // No storage for battle mode
+    if (!RaceManager::get()->modeHasLaps())
+        return;
+
+    World* w = World::getWorld();
+    if (!w)
+        return;
+
+    unsigned player_count = RaceManager::get()->getNumPlayers();
+
+    // Store race results if database is configured
+    Log::info("ServerLobby", "=== RACE RESULT STORAGE START ===");
+    Log::info("ServerLobby", "DB connector: %s, Race results table: %s",
+              m_db_connector ? "exists" : "null",
+              (m_db_connector && m_db_connector->hasRaceResultsTable()) ? "exists" : "missing");
+    Log::info("ServerLobby", "Demo name at start: '%s' (empty: %s)",
+              g_network_demo_current_name.c_str(),
+              g_network_demo_current_name.empty() ? "true" : "false");
+              
+    if (m_db_connector && m_db_connector->hasRaceResultsTable())
+    {
+        std::string track_name = RaceManager::get()->getTrackName();
+        
+        Log::info("ServerLobby", "Storing race results for track: %s, player count: %d", 
+                  track_name.c_str(), player_count);
+        
+        for (unsigned i = 0; i < player_count; i++)
+        {
+            // Get player name - use demo name if available, otherwise use RaceManager kart info
+            std::string player_name;
+            if (!g_network_demo_current_name.empty())
+            {
+                player_name = g_network_demo_current_name;
+                Log::info("ServerLobby", "Using demo name for race results: %s", player_name.c_str());
+            }
+            else
+            {
+                core::stringw player_name_w = RaceManager::get()->getKartInfo(i).getPlayerName();
+                player_name = StringUtils::wideToUtf8(player_name_w);
+                Log::info("ServerLobby", "Using RaceManager name for race results: %s", player_name.c_str());
+            }
+            
+            // Get the race time for this player
+            float race_time = RaceManager::get()->getKartRaceTime(i);
+            
+            // Get host ID (use kart index as fallback if peer not found)
+            uint32_t host_id = i + 1;  // Simple fallback, could be improved
+            
+            bool eliminated = w->getKart(i)->isEliminated();
+            
+            Log::info("ServerLobby", "Player %d: name='%s', time=%.3f, eliminated=%s", 
+                      i, player_name.c_str(), race_time, eliminated ? "true" : "false");
+            
+            // Only store if player finished and has valid time
+            if (!eliminated && race_time > 0.0f && !player_name.empty())
+            {
+                Log::info("ServerLobby", "Storing result for %s: %.3f seconds", 
+                          player_name.c_str(), race_time);
+                m_db_connector->storeRaceResult(player_name, track_name, race_time, host_id);
+            }
+            else
+            {
+                Log::info("ServerLobby", "Skipping player %s (eliminated=%s, time=%.3f, name_empty=%s)",
+                          player_name.c_str(), eliminated ? "true" : "false", race_time,
+                          player_name.empty() ? "true" : "false");
+            }
+        }
+        
+        // Clear demo name after storing results so new prompt will appear
+        if (!g_network_demo_current_name.empty())
+        {
+            Log::info("ServerLobby", "Clearing demo name '%s' after race result storage - new prompt should appear", 
+                      g_network_demo_current_name.c_str());
+            g_network_demo_current_name.clear();
+            Log::info("ServerLobby", "Demo name cleared - now empty: %s", 
+                      g_network_demo_current_name.empty() ? "true" : "false");
+        }
+        else
+        {
+            Log::info("ServerLobby", "Demo name was already empty when trying to clear");
+        }
+        
+        Log::info("ServerLobby", "=== RACE RESULT STORAGE END ===");
+    }
+    else
+    {
+        Log::info("ServerLobby", "No database or table - skipping race result storage");
+        Log::info("ServerLobby", "=== RACE RESULT STORAGE END ===");
+    }
+}   // storeRaceResults
 
 //-----------------------------------------------------------------------------
 /** Compute the new player's rankings used in ranked servers
@@ -4210,13 +4320,13 @@ void ServerLobby::setPlayerKarts(const NetworkString& ns, STKPeer* peer) const
  */
 void ServerLobby::handleKartInfo(Event* event)
 {
+    STKPeer* peer = event->getPeer();
+    const NetworkString& data = event->data();
+    uint8_t kart_id = data.getUInt8();
     World* w = World::getWorld();
     if (!w)
         return;
 
-    STKPeer* peer = event->getPeer();
-    const NetworkString& data = event->data();
-    uint8_t kart_id = data.getUInt8();
     if (kart_id > RaceManager::get()->getNumPlayers())
         return;
 

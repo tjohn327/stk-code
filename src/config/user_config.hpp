@@ -942,6 +942,11 @@ namespace UserConfigParams
         PARAM_DEFAULT(BoolUserConfigParam(true, "wan-server-gp",
         &m_network_group, "Show grand prix option in create WAN server "
         "screen, false will show AI option."));
+    PARAM_PREFIX BoolUserConfigParam m_network_demo_mode
+        PARAM_DEFAULT(BoolUserConfigParam(false, "network-demo-mode",
+        &m_network_group, "Enable demo mode for network play. When enabled, "
+        "players are prompted to enter a temporary name instead of using "
+        "existing profiles. Names are stored in server database."));
 
     // ---- Gamemode setup
     PARAM_PREFIX UIntToUIntUserConfigParam m_num_karts_per_gamemode
@@ -1489,6 +1494,8 @@ public:
 
 };   // UserConfig
 
+/** Current demo name for race result storage (not saved to config) */
+extern std::string g_network_demo_current_name;
 
 extern UserConfig *user_config;
 

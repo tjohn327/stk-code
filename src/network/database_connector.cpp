@@ -94,6 +94,7 @@ void DatabaseConnector::initDatabase()
     m_ip_geolocation_table_exists = false;
     m_ipv6_geolocation_table_exists = false;
     m_player_reports_table_exists = false;
+    m_race_results_table_exists = false;
     if (!ServerConfig::m_sql_management)
         return;
     const std::string& path = ServerConfig::getConfigDirectory() + "/" +
@@ -135,6 +136,14 @@ void DatabaseConnector::initDatabase()
         m_ip_geolocation_table_exists);
     checkTableExists(ServerConfig::m_ipv6_geolocation_table,
         m_ipv6_geolocation_table_exists);
+    checkTableExists(ServerConfig::m_race_results_table,
+        m_race_results_table_exists);
+    
+    // Initialize race results table if needed
+    if (!m_race_results_table_exists && !ServerConfig::m_race_results_table.toString().empty())
+    {
+        initRaceResultsTable();
+    }
 }   // initDatabase
 
 //-----------------------------------------------------------------------------
@@ -984,4 +993,146 @@ void DatabaseConnector::listBanTable()
         sqlite3_exec(m_db, query.c_str(), printer, NULL, NULL);
     }
 }   // listBanTable
+
+//-----------------------------------------------------------------------------
+/** Creates the race results table for storing demo mode race results. */
+void DatabaseConnector::initRaceResultsTable()
+{
+    if (!ServerConfig::m_sql_management || !m_db)
+        return;
+        
+    std::string table_name = ServerConfig::m_race_results_table.toString().c_str();
+    if (table_name.empty())
+        return;
+
+    std::string query = StringUtils::insertValues(
+        "CREATE TABLE IF NOT EXISTS %s (\n"
+        "    result_id INTEGER PRIMARY KEY AUTOINCREMENT, -- Unique result ID\n"
+        "    player_name TEXT NOT NULL, -- Player name entered in demo mode\n"
+        "    track_name TEXT NOT NULL, -- Name of the track raced\n"
+        "    lap_time REAL NOT NULL, -- Best lap time in seconds\n"
+        "    host_id INTEGER UNSIGNED NOT NULL, -- Host ID from server stats\n"
+        "    race_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP -- When the race was completed\n"
+        ");", table_name.c_str());
+
+    if (easySQLQuery(query))
+    {
+        m_race_results_table_exists = true;
+        Log::info("DatabaseConnector", "Race results table '%s' created successfully.", 
+                  table_name.c_str());
+        
+        // Create an index for faster queries by track
+        std::string index_query = StringUtils::insertValues(
+            "CREATE INDEX IF NOT EXISTS idx_%s_track_time ON %s (track_name, lap_time);",
+            table_name.c_str(), table_name.c_str());
+        easySQLQuery(index_query);
+    }
+    else
+    {
+        Log::error("DatabaseConnector", "Failed to create race results table '%s'.", 
+                   table_name.c_str());
+    }
+}   // initRaceResultsTable
+
+//-----------------------------------------------------------------------------
+/** Stores a race result in the database for demo mode leaderboards.
+ *  \param player_name The name entered by the player in demo mode.
+ *  \param track_name The name of the track that was raced.
+ *  \param lap_time The best lap time achieved in seconds.
+ *  \param host_id The host ID for associating with server stats.
+ */
+void DatabaseConnector::storeRaceResult(const std::string& player_name, 
+                                       const std::string& track_name,
+                                       float lap_time, uint32_t host_id)
+{
+    if (!ServerConfig::m_sql_management || !m_db || !m_race_results_table_exists)
+        return;
+        
+    std::string table_name = ServerConfig::m_race_results_table.toString().c_str();
+    if (table_name.empty() || player_name.empty() || track_name.empty() || lap_time <= 0.0f)
+        return;
+
+    std::shared_ptr<BinderCollection> coll = std::make_shared<BinderCollection>();
+    std::string query = StringUtils::insertValues(
+        "INSERT INTO %s (player_name, track_name, lap_time, host_id) VALUES (%s, %s, %f, %u);",
+        table_name.c_str(),
+        Binder(coll, player_name, "player_name"),
+        Binder(coll, track_name, "track_name"),
+        lap_time,
+        host_id);
+
+    if (easySQLQuery(query, nullptr, coll->getBindFunction()))
+    {
+        Log::info("DatabaseConnector", "Stored race result: %s on %s with time %.3fs", 
+                  player_name.c_str(), track_name.c_str(), lap_time);
+    }
+    else
+    {
+        Log::error("DatabaseConnector", "Failed to store race result for %s on %s", 
+                   player_name.c_str(), track_name.c_str());
+    }
+}   // storeRaceResult
+
+//-----------------------------------------------------------------------------
+/** Retrieves leaderboard data from the race results table.
+ *  \param track_name Optional track name to filter results. Empty for all tracks.
+ *  \param limit Maximum number of results to return (default 10).
+ *  \return Vector of rows, each containing: player_name, track_name, lap_time, race_time.
+ */
+std::vector<std::vector<std::string>> DatabaseConnector::getLeaderboard(
+    const std::string& track_name, int limit)
+{
+    std::vector<std::vector<std::string>> results;
+    
+    if (!ServerConfig::m_sql_management || !m_db || !m_race_results_table_exists)
+        return results;
+        
+    std::string table_name = ServerConfig::m_race_results_table.toString().c_str();
+    if (table_name.empty())
+        return results;
+
+    std::string query;
+    std::shared_ptr<BinderCollection> coll;
+    
+    if (track_name.empty())
+    {
+        // Get best times across all tracks
+        query = StringUtils::insertValues(
+            "SELECT player_name, track_name, lap_time, race_time "
+            "FROM %s "
+            "ORDER BY lap_time ASC "
+            "LIMIT %d;",
+            table_name.c_str(), limit);
+    }
+    else
+    {
+        // Get best times for specific track
+        coll = std::make_shared<BinderCollection>();
+        query = StringUtils::insertValues(
+            "SELECT player_name, track_name, lap_time, race_time "
+            "FROM %s "
+            "WHERE track_name = %s "
+            "ORDER BY lap_time ASC "
+            "LIMIT %d;",
+            table_name.c_str(),
+            Binder(coll, track_name, "track_name"),
+            limit);
+    }
+
+    auto bind_function = coll ? coll->getBindFunction() : nullptr;
+    
+    if (easySQLQuery(query, &results, bind_function))
+    {
+        Log::info("DatabaseConnector", "Retrieved %d leaderboard entries for track '%s'", 
+                  (int)results.size(), track_name.empty() ? "all" : track_name.c_str());
+    }
+    else
+    {
+        Log::error("DatabaseConnector", "Failed to retrieve leaderboard for track '%s'", 
+                   track_name.empty() ? "all" : track_name.c_str());
+    }
+    
+    return results;
+}   // getLeaderboard
+
 #endif // ENABLE_SQLITE3

@@ -84,7 +84,10 @@ private:
 
     bool m_has_auto_start_in_server,
         m_server_configurable, m_client_live_joinable,
-        m_reload_server_info, m_assigned_players;
+        m_reload_server_info, m_assigned_players, m_demo_name_prompted,
+        m_needs_demo_name_check;
+
+    core::stringw m_demo_name;
 
     Addon* m_addon_install;
     video::ITexture* m_config_texture;
@@ -110,6 +113,9 @@ private:
     virtual void onTextUpdated() OVERRIDE {}
     virtual bool onEnterPressed(const irr::core::stringw& text) OVERRIDE;
     void updatePlayerPings();
+    void showDemoNamePrompt();
+    void onDemoNameEntered(const irr::core::stringw& name);
+    void onDemoNameCancelled();
 
 public:
 

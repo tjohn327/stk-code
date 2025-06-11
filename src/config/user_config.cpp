@@ -50,6 +50,9 @@ static std::vector<UserConfigParam*> all_params;
 #include <string>
 #include <vector>
 
+// Define global variable for demo name storage
+std::string g_network_demo_current_name;
+
 const int UserConfig::m_current_config_version = 8;
 
 

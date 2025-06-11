@@ -21,6 +21,11 @@
 #include "audio/music_manager.hpp"
 #include "audio/sfx_manager.hpp"
 #include "audio/sfx_base.hpp"
+#include "states_screens/dialogs/network_name_dialog.hpp"
+#include "utils/string_utils.hpp"
+#include "network/network_string.hpp"
+#include "network/stk_host.hpp"
+#include "network/protocols/lobby_protocol.hpp"
 #include "challenges/challenge_status.hpp"
 #include "challenges/story_mode_timer.hpp"
 #include "challenges/unlock_manager.hpp"
@@ -430,11 +435,69 @@ void RaceResultGUI::eventCallback(GUIEngine::Widget* widget,
         {
             if (action == "right") // Continue button (return to server lobby)
             {
-                // Signal to the server that this client is back in the lobby now.
-                auto cl = LobbyProtocol::get<ClientLobby>();
-                if (cl)
-                    cl->doneWithResults();
-                getWidget<GUIEngine::IconButtonWidget>("right")->setLabel(_("Waiting for others"));
+                Log::info("RaceResultGUI", "Continue button pressed - checking demo mode conditions");
+                Log::info("RaceResultGUI", "Demo mode: %s", 
+                          UserConfigParams::m_network_demo_mode ? "true" : "false");
+                Log::info("RaceResultGUI", "Demo name empty: %s", 
+                          g_network_demo_current_name.empty() ? "true" : "false");
+                Log::info("RaceResultGUI", "Current demo name: '%s'", 
+                          g_network_demo_current_name.c_str());
+                Log::info("RaceResultGUI", "No dialog active: %s", 
+                          !GUIEngine::ModalDialog::isADialogActive() ? "true" : "false");
+                
+                // Force clear demo name for next race if in demo mode
+                if (UserConfigParams::m_network_demo_mode && !g_network_demo_current_name.empty())
+                {
+                    Log::info("RaceResultGUI", "Demo mode: clearing demo name '%s' to force new prompt", 
+                              g_network_demo_current_name.c_str());
+                    g_network_demo_current_name.clear();
+                }
+                
+                // Check if we need to prompt for a new demo name before returning to lobby
+                if (UserConfigParams::m_network_demo_mode && 
+                    g_network_demo_current_name.empty() &&
+                    !GUIEngine::ModalDialog::isADialogActive())
+                {
+                    Log::info("RaceResultGUI", "Demo mode active and name cleared - showing name prompt");
+                    new NetworkNameDialog([this](const core::stringw& name) {
+                        // Store the new demo name locally
+                        g_network_demo_current_name = StringUtils::wideToUtf8(name);
+                        Log::info("RaceResultGUI", "New demo name entered: %s", 
+                                  g_network_demo_current_name.c_str());
+                        
+                        // Send demo name to server for race result storage
+                        NetworkString* demo_name_msg = getNetworkString(1 + name.size() * 4);
+                        demo_name_msg->setSynchronous(true);
+                        demo_name_msg->addUInt8(LE_DEMO_NAME);
+                        demo_name_msg->encodeString(name);
+                        STKHost::get()->sendToServer(demo_name_msg, true);
+                        delete demo_name_msg;
+                        Log::info("RaceResultGUI", "Sent demo name to server: %s", 
+                                  g_network_demo_current_name.c_str());
+                        
+                        // Now signal to server that we're back in lobby
+                        auto cl = LobbyProtocol::get<ClientLobby>();
+                        if (cl)
+                            cl->doneWithResults();
+                        getWidget<GUIEngine::IconButtonWidget>("right")->setLabel(_("Waiting for others"));
+                    }, [this]() {
+                        Log::info("RaceResultGUI", "Demo name prompt cancelled");
+                        // Still return to lobby even if cancelled
+                        auto cl = LobbyProtocol::get<ClientLobby>();
+                        if (cl)
+                            cl->doneWithResults();
+                        getWidget<GUIEngine::IconButtonWidget>("right")->setLabel(_("Waiting for others"));
+                    });
+                }
+                else
+                {
+                    Log::info("RaceResultGUI", "Not showing demo prompt - using normal flow");
+                    // Normal flow - signal to the server that this client is back in the lobby now.
+                    auto cl = LobbyProtocol::get<ClientLobby>();
+                    if (cl)
+                        cl->doneWithResults();
+                    getWidget<GUIEngine::IconButtonWidget>("right")->setLabel(_("Waiting for others"));
+                }
             }
             if (action == "left") // Quit server (return to online lan / wan menu)
             {

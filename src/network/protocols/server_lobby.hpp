@@ -179,6 +179,9 @@ private:
 
     uint64_t m_last_unsuccess_poll_time, m_server_started_at, m_server_delay;
 
+    // Track if race results have been stored (for demo mode delayed storage)
+    bool m_race_results_stored;
+
     // Default game settings if no one has ever vote, and save inside here for
     // final vote (for live join)
     PeerVote* m_default_vote;
@@ -275,6 +278,7 @@ private:
     void getRankingForPlayer(std::shared_ptr<NetworkPlayerProfile> p);
     void submitRankingsToAddons();
     void computeNewRankings();
+    void storeRaceResults();
     void checkRaceFinished();
     void getHitCaptureLimit();
     void configPeersStartTime();

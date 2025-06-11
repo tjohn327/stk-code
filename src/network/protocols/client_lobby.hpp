@@ -177,6 +177,7 @@ public:
     bool isServerAutoGameTime() const       { return m_server_auto_game_time; }
     virtual bool isRacing() const OVERRIDE { return m_state.load() == RACING; }
     void requestKartInfo(uint8_t kart_id);
+    void updatePlayerName(uint8_t kart_id, const irr::core::stringw& new_name);
     void setSpectator(bool val)                          { m_spectator = val; }
     bool isSpectator() const
                      { return m_spectator && m_state.load() != RACE_FINISHED; }

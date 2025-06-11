@@ -21,6 +21,8 @@
 #include "addons/addons_manager.hpp"
 #include "audio/music_manager.hpp"
 #include "audio/sfx_manager.hpp"
+#include "states_screens/dialogs/network_name_dialog.hpp"
+#include "utils/string_utils.hpp"
 #include "config/user_config.hpp"
 #include "config/player_manager.hpp"
 #include "graphics/camera/camera.hpp"
@@ -494,7 +496,38 @@ void ClientLobby::update(int ticks)
             StkTime::getMonoTimeMs() > m_auto_back_to_lobby_time)
         {
             m_auto_back_to_lobby_time = std::numeric_limits<uint64_t>::max();
-            doneWithResults();
+            
+            // Force clear demo name for next race if in demo mode
+            if (UserConfigParams::m_network_demo_mode && !g_network_demo_current_name.empty())
+            {
+                Log::info("ClientLobby", "Auto-timeout: clearing demo name '%s' to force new prompt", 
+                          g_network_demo_current_name.c_str());
+                g_network_demo_current_name.clear();
+            }
+            
+            // Check if we need to prompt for demo name before auto-returning to lobby
+            if (UserConfigParams::m_network_demo_mode && 
+                g_network_demo_current_name.empty() &&
+                !GUIEngine::ModalDialog::isADialogActive())
+            {
+                Log::info("ClientLobby", "Auto-timeout triggered in demo mode - showing name prompt");
+                new NetworkNameDialog([this](const core::stringw& name) {
+                    // Store the new demo name
+                    g_network_demo_current_name = StringUtils::wideToUtf8(name);
+                    Log::info("ClientLobby", "Demo name entered via auto-timeout: %s", 
+                              g_network_demo_current_name.c_str());
+                    // Now proceed with returning to lobby
+                    doneWithResults();
+                }, [this]() {
+                    Log::info("ClientLobby", "Demo name prompt cancelled via auto-timeout");
+                    // Still return to lobby even if cancelled
+                    doneWithResults();
+                });
+            }
+            else
+            {
+                doneWithResults();
+            }
         }
         break;
     case DONE:
@@ -1385,6 +1418,13 @@ void ClientLobby::requestKartInfo(uint8_t kart_id)
     sendToServer(ns, true/*reliable*/);
     delete ns;
 }   // requestKartInfo
+
+//-----------------------------------------------------------------------------
+void ClientLobby::updatePlayerName(uint8_t kart_id, const irr::core::stringw& new_name)
+{
+    // This method is no longer used - we use global storage instead
+    Log::info("ClientLobby", "updatePlayerName called but using global storage approach instead");
+}   // updatePlayerName
 
 //-----------------------------------------------------------------------------
 void ClientLobby::handleKartInfo(Event* event)

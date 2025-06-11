@@ -719,6 +719,8 @@ void cmdLineHelp()
     "       --render-driver=n   Render driver to use (gl or directx9).\n"
     "       --disable-addon-karts Disable loading of addon karts.\n"
     "       --disable-addon-tracks Disable loading of addon tracks.\n"
+    "       --network-demo-mode Enable network demo mode. Shows name prompt\n"
+    "                           instead of profile selection for LAN connections.\n"
     "       --dump-official-karts Dump official karts for current stk-assets.\n"
     "       --apitrace          This will disable buffer storage and\n"
     "                           writing gpu query strings to opengl, which\n"
@@ -1037,6 +1039,9 @@ int handleCmdLinePreliminary()
         UserConfigParams::m_disable_addon_karts = true;
     if (CommandLine::has("--disable-addon-tracks"))
         UserConfigParams::m_disable_addon_tracks = true;
+
+    if (CommandLine::has("--network-demo-mode"))
+        UserConfigParams::m_network_demo_mode = true;
 
     return 0;
 }   // handleCmdLinePreliminary

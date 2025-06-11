@@ -24,6 +24,8 @@
 #include "addons/addons_manager.hpp"
 #include "config/user_config.hpp"
 #include "config/player_manager.hpp"
+#include "states_screens/dialogs/network_name_dialog.hpp"
+#include "online/online_player_profile.hpp"
 #include "font/font_manager.hpp"
 #include "graphics/irr_driver.hpp"
 #include "guiengine/CGUISpriteBank.hpp"
@@ -183,7 +185,9 @@ void NetworkingLobby::init()
     m_has_auto_start_in_server = false;
     m_client_live_joinable = false;
     m_assigned_players = false;
+    m_demo_name_prompted = false;
     m_addon_install = NULL;
+    m_needs_demo_name_check = false;
     m_ping_update_timer = 0;
     m_start_timeout = std::numeric_limits<float>::max();
     m_cur_starting_timer = std::numeric_limits<int64_t>::max();
@@ -222,11 +226,21 @@ void NetworkingLobby::init()
     m_emoji_button->setText(L"\u263A");
 
     // Connect to server now if we have saved players and not disconnected
+    // But skip auto-connect in demo mode since we need to prompt for name first
     if (!LobbyProtocol::get<LobbyProtocol>() &&
-        !NetworkConfig::get()->getNetworkPlayers().empty())
+        !NetworkConfig::get()->getNetworkPlayers().empty() &&
+        !UserConfigParams::m_network_demo_mode)
         std::make_shared<ConnectToServer>(m_joined_server)->requestStart();
 
-    if (NetworkConfig::get()->getNetworkPlayers().empty())
+    // Check if we need demo name prompt when returning to lobby
+    else if (UserConfigParams::m_network_demo_mode && 
+             g_network_demo_current_name.empty() &&
+             !m_demo_name_prompted)
+    {
+        Log::info("NetworkingLobby", "Returning to lobby in demo mode - will prompt for name");
+        m_needs_demo_name_check = true;
+    }
+    else if (NetworkConfig::get()->getNetworkPlayers().empty())
     {
         m_state = LS_ADD_PLAYERS;
     }
@@ -470,6 +484,30 @@ void NetworkingLobby::onUpdate(float delta)
     m_addon_install = NULL;
     if (NetworkConfig::get()->isServer() || !STKHost::existHost())
         return;
+
+    // Check if we need to prompt for a new demo name after race
+    if ((UserConfigParams::m_network_demo_mode && 
+         g_network_demo_current_name.empty() && 
+         !m_demo_name_prompted &&
+         !GUIEngine::ModalDialog::isADialogActive() &&
+         NetworkConfig::get()->isClient()) ||
+        m_needs_demo_name_check)
+    {
+        Log::info("NetworkingLobby", "Demo mode active, name empty, showing name prompt");
+        Log::info("NetworkingLobby", "Demo mode: %s, Name empty: %s, Not prompted: %s, No dialog: %s, Need check: %s",
+                  UserConfigParams::m_network_demo_mode ? "true" : "false",
+                  g_network_demo_current_name.empty() ? "true" : "false", 
+                  !m_demo_name_prompted ? "true" : "false",
+                  !GUIEngine::ModalDialog::isADialogActive() ? "true" : "false",
+                  m_needs_demo_name_check ? "true" : "false");
+        m_demo_name_prompted = true;
+        m_needs_demo_name_check = false;
+        new NetworkNameDialog([this](const core::stringw& name) {
+            onDemoNameEntered(name);
+        }, [this]() {
+            onDemoNameCancelled();
+        });
+    }
 
     if (m_header->getText() != m_header_text)
     {
@@ -920,6 +958,19 @@ void NetworkingLobby::tearDown()
     st->setMouseCallback(nullptr);
     m_player_list = NULL;
     m_joined_server.reset();
+    
+    // Reset demo prompt flags when leaving lobby
+    if (UserConfigParams::m_network_demo_mode)
+    {
+        Log::info("NetworkingLobby", "Leaving lobby - resetting demo prompt flags for next time");
+        m_demo_name_prompted = false;
+        m_needs_demo_name_check = false;
+    }
+    else
+    {
+        m_demo_name_prompted = false;  // Reset demo prompt flag
+    }
+    
     m_header_text = _("Lobby");
     if (m_header)
         m_header->setText(m_header_text, true);
@@ -1089,3 +1140,129 @@ void NetworkingLobby::setJoinedServer(std::shared_ptr<Server> server)
     m_server_info.clear();
     m_header_text = _("Lobby");
 }   // setJoinedServer
+
+// ----------------------------------------------------------------------------
+void NetworkingLobby::showDemoNamePrompt()
+{
+    Log::info("NetworkingLobby", "Showing demo mode name prompt");
+    
+    m_demo_name_prompted = true;  // Mark that we've shown the prompt
+    
+    new NetworkNameDialog([this](const core::stringw& name) {
+        onDemoNameEntered(name);
+    }, [this]() {
+        onDemoNameCancelled();
+    });
+}   // showDemoNamePrompt
+
+// ----------------------------------------------------------------------------
+void NetworkingLobby::onDemoNameEntered(const core::stringw& name)
+{
+    Log::info("NetworkingLobby", "Demo name entered: %s", 
+              StringUtils::wideToUtf8(name).c_str());
+    
+    // Store the demo name globally for race result storage
+    g_network_demo_current_name = StringUtils::wideToUtf8(name);
+    
+    Log::info("NetworkingLobby", "Stored demo name for race results: %s", 
+              g_network_demo_current_name.c_str());
+    
+    // Reset the prompted flag so we can prompt again after next race
+    m_demo_name_prompted = false;
+    
+    // If we're already connected to a server (returning from a race), we don't need to reconnect
+    if (LobbyProtocol::get<LobbyProtocol>())
+    {
+        Log::info("NetworkingLobby", "Already connected, just updated demo name for next race");
+        return;
+    }
+    
+    // Store the demo name for this session
+    m_demo_name = name;
+    
+    // Clean any existing network players
+    NetworkConfig::get()->cleanNetworkPlayers();
+    
+    // Create a temporary guest profile with the demo name
+    PlayerProfile* demo_profile = nullptr;
+    try
+    {
+        demo_profile = new Online::OnlinePlayerProfile(name, true/*is_guest*/);
+        Log::info("NetworkingLobby", "Created demo profile: %s", 
+                  StringUtils::wideToUtf8(demo_profile->getName()).c_str());
+    }
+    catch (const std::exception& e)
+    {
+        Log::error("NetworkingLobby", "Failed to create demo profile: %s", e.what());
+        StateManager::get()->escapePressed();
+        return;
+    }
+    
+    // Get input device safely
+    InputDevice* device = nullptr;
+    if (input_manager && input_manager->getDeviceManager())
+    {
+        device = input_manager->getDeviceManager()->getLatestUsedDevice();
+    }
+    
+    if (!device)
+    {
+        Log::error("NetworkingLobby", "No input device available for demo mode");
+        delete demo_profile;
+        StateManager::get()->escapePressed();
+        return;
+    }
+    
+    // Add the temporary profile as the network player
+    bool success = NetworkConfig::get()->addNetworkPlayer(device, demo_profile, HANDICAP_NONE);
+    if (!success)
+    {
+        Log::error("NetworkingLobby", "Failed to add network player in demo mode");
+        delete demo_profile;
+        StateManager::get()->escapePressed();
+        return;
+    }
+    
+    NetworkConfig::get()->doneAddingNetworkPlayers();
+    
+    // Check if we have a valid server to connect to
+    if (!m_joined_server)
+    {
+        Log::error("NetworkingLobby", "No server to connect to in demo mode");
+        StateManager::get()->escapePressed();
+        return;
+    }
+    
+    // Set connecting state and connect to server
+    m_state = LS_CONNECTING;
+    
+    Log::info("NetworkingLobby", "Starting connection to server in demo mode");
+    try
+    {
+        auto protocol = std::make_shared<ConnectToServer>(m_joined_server);
+        protocol->requestStart();
+        Log::info("NetworkingLobby", "Connection request sent successfully");
+    }
+    catch (const std::exception& e)
+    {
+        Log::error("NetworkingLobby", "Exception during connection: %s", e.what());
+        StateManager::get()->escapePressed();
+    }
+    catch (...)
+    {
+        Log::error("NetworkingLobby", "Unknown exception during connection");
+        StateManager::get()->escapePressed();
+    }
+}   // onDemoNameEntered
+
+// ----------------------------------------------------------------------------
+void NetworkingLobby::onDemoNameCancelled()
+{
+    Log::info("NetworkingLobby", "Demo name prompt cancelled, going back");
+    
+    // Reset the flag so the prompt can be shown again
+    m_demo_name_prompted = false;
+    
+    // Go back to the previous screen
+    StateManager::get()->escapePressed();
+}   // onDemoNameCancelled

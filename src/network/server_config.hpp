@@ -438,6 +438,13 @@ namespace ServerConfig
         "empty to disable. "
         "This table can be shared for all servers if you use the same name."));
 
+    SERVER_CFG_PREFIX StringServerConfigParam m_race_results_table
+        SERVER_CFG_DEFAULT(StringServerConfigParam("race_results",
+        "race-results-table",
+        "Race results table for storing demo mode race results with player names, "
+        "track names, and lap times. Used for network demo mode leaderboards. "
+        "Empty to disable race result storage."));
+
     SERVER_CFG_PREFIX BoolServerConfigParam m_ai_handling
         SERVER_CFG_DEFAULT(BoolServerConfigParam(false, "ai-handling",
         "If true this server will auto add / remove AI connected with "

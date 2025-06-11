@@ -115,6 +115,7 @@ private:
     bool m_ip_geolocation_table_exists;
     bool m_ipv6_geolocation_table_exists;
     bool m_player_reports_table_exists;
+    bool m_race_results_table_exists;
     uint64_t m_last_poll_db_time;
 
 public:
@@ -171,6 +172,8 @@ public:
     bool hasServerStatsTable() const  { return !m_server_stats_table.empty(); }
     bool hasPlayerReportsTable() const
                                       { return m_player_reports_table_exists; }
+    bool hasRaceResultsTable() const
+                                      { return m_race_results_table_exists; }
     bool hasIpBanTable() const                { return m_ip_ban_table_exists; }
     bool hasIpv6BanTable() const            { return m_ipv6_ban_table_exists; }
     bool hasOnlineIdBanTable() const   { return m_online_id_ban_table_exists; }
@@ -189,6 +192,11 @@ public:
     void onPlayerJoinQueries(std::shared_ptr<STKPeer> peer, uint32_t online_id,
         unsigned player_count, const std::string& country_code);
     void listBanTable();
+    void initRaceResultsTable();
+    void storeRaceResult(const std::string& player_name, const std::string& track_name, 
+                         float lap_time, uint32_t host_id);
+    std::vector<std::vector<std::string>> getLeaderboard(const std::string& track_name = "", 
+                                                         int limit = 10);
 };
 
 #endif // ifndef DATABASE_CONNECTOR_HPP

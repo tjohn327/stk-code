@@ -51,6 +51,8 @@
 #include "states_screens/options/user_screen.hpp"
 #include "states_screens/dialogs/general_text_field_dialog.hpp"
 #include "states_screens/dialogs/message_dialog.hpp"
+#include "states_screens/dialogs/network_name_dialog.hpp"
+#include "online/online_player_profile.hpp"
 #include "utils/string_utils.hpp"
 #include "utils/translation.hpp"
 #include "states_screens/dialogs/enter_address_dialog.hpp"
@@ -67,6 +69,7 @@ OnlineScreen::OnlineScreen() : Screen("online/online.stkgui")
     m_online_string = _("Your profile");
     //I18N: Used as a verb, appears on the main networking menu (login button)
     m_login_string = _("Login");
+    m_waiting_for_demo_name = false;
 }   // OnlineScreen
 
 // ----------------------------------------------------------------------------
@@ -236,16 +239,28 @@ void OnlineScreen::onUpdate(float delta)
     m_online->setLabel(PlayerManager::getCurrentOnlineId() ? m_online_string
                                                            : m_login_string);
     // In case for entering server address finished
-    if (m_entered_server)
+    if (m_entered_server && !m_waiting_for_demo_name)
     {
-        NetworkConfig::get()->setIsLAN();
-        NetworkConfig::get()->setIsServer(false);
-        ServerConfig::m_private_server_password = "";
-        STKHost::create();
-        NetworkingLobby::getInstance()->setJoinedServer(m_entered_server);
-        m_entered_server = nullptr;
-        StateManager::get()->resetAndSetStack(
-            NetworkConfig::get()->getResetScreens(true/*lobby*/).data());
+        Log::info("OnlineScreen", "Demo mode enabled: %s", 
+                  UserConfigParams::m_network_demo_mode ? "true" : "false");
+        
+        if (UserConfigParams::m_network_demo_mode)
+        {
+            Log::info("OnlineScreen", "Showing demo mode name prompt dialog");
+            // Show name prompt dialog for demo mode
+            m_waiting_for_demo_name = true;
+            new NetworkNameDialog([this](const core::stringw& name) {
+                onDemoNameEntered(name);
+            }, [this]() {
+                onDemoNameCancelled();
+            });
+        }
+        else
+        {
+            Log::info("OnlineScreen", "Using normal connection flow");
+            // Normal connection flow
+            proceedWithConnection();
+        }
     }
 }   // onUpdate
 
@@ -361,3 +376,55 @@ bool OnlineScreen::onEscapePressed()
     NetworkConfig::get()->unsetNetworking();
     return true;
 }   // onEscapePressed
+
+// ----------------------------------------------------------------------------
+void OnlineScreen::proceedWithConnection()
+{
+    NetworkConfig::get()->setIsLAN();
+    NetworkConfig::get()->setIsServer(false);
+    ServerConfig::m_private_server_password = "";
+    STKHost::create();
+    NetworkingLobby::getInstance()->setJoinedServer(m_entered_server);
+    m_entered_server = nullptr;
+    StateManager::get()->resetAndSetStack(
+        NetworkConfig::get()->getResetScreens(true/*lobby*/).data());
+}   // proceedWithConnection
+
+// ----------------------------------------------------------------------------
+void OnlineScreen::onDemoNameEntered(const core::stringw& name)
+{
+    Log::info("OnlineScreen", "Demo name entered: %s", 
+              StringUtils::wideToUtf8(name).c_str());
+    
+    m_demo_name = name;
+    m_waiting_for_demo_name = false;
+    
+    // Store the demo name globally for race result storage
+    g_network_demo_current_name = StringUtils::wideToUtf8(name);
+    Log::info("OnlineScreen", "Stored demo name for race results: %s", 
+              g_network_demo_current_name.c_str());
+    
+    // Create a temporary player profile with the demo name
+    NetworkConfig::get()->cleanNetworkPlayers();
+    
+    // Create a temporary guest profile (guest accounts are not saved to disk)
+    PlayerProfile* demo_profile = new Online::OnlinePlayerProfile(m_demo_name, true/*is_guest*/);
+    
+    Log::info("OnlineScreen", "Created demo profile for: %s", 
+              StringUtils::wideToUtf8(demo_profile->getName()).c_str());
+    
+    // Add the temporary profile as the network player
+    NetworkConfig::get()->addNetworkPlayer(
+        input_manager->getDeviceManager()->getLatestUsedDevice(),
+        demo_profile, HANDICAP_NONE);
+    NetworkConfig::get()->doneAddingNetworkPlayers();
+    
+    proceedWithConnection();
+}   // onDemoNameEntered
+
+// ----------------------------------------------------------------------------
+void OnlineScreen::onDemoNameCancelled()
+{
+    m_waiting_for_demo_name = false;
+    m_entered_server = nullptr;  // Cancel the connection
+}   // onDemoNameCancelled
