@@ -263,12 +263,8 @@ void OnlineScreen::onUpdate(float delta)
             m_waiting_for_demo_name = true;
             new NetworkNameDialog([this](const core::stringw& name) {
                 onDemoNameEntered(name);
-                StateManager::get()->resetAndSetStack(
-                    NetworkConfig::get()->getResetScreens(true/*lobby*/).data());
             }, [this]() {
                 onDemoNameCancelled();
-                StateManager::get()->resetAndSetStack(
-                    NetworkConfig::get()->getResetScreens(true/*lobby*/).data());
             });
         }
         else
