@@ -239,6 +239,18 @@ void OnlineScreen::onUpdate(float delta)
     m_online->setLabel(PlayerManager::getCurrentOnlineId() ? m_online_string
                                                            : m_login_string);
     // In case for entering server address finished
+    if (m_entered_server)
+    {
+        NetworkConfig::get()->setIsLAN();
+        NetworkConfig::get()->setIsServer(false);
+        ServerConfig::m_private_server_password = "";
+        STKHost::create();
+        NetworkingLobby::getInstance()->setJoinedServer(m_entered_server);
+        m_entered_server = nullptr;
+        StateManager::get()->resetAndSetStack(
+            NetworkConfig::get()->getResetScreens(true/*lobby*/).data());
+    }
+
     if (m_entered_server && !m_waiting_for_demo_name)
     {
         Log::info("OnlineScreen", "Demo mode enabled: %s", 
