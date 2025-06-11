@@ -630,7 +630,17 @@ bool KartSelectionScreen::joinPlayer(InputDevice* device, PlayerProfile* p)
     if (p != NULL)
     {
         newPlayerWidget->getPlayerNameSpinner()->setActive(false);
-        newPlayerWidget->getPlayerNameSpinner()->setCustomText(p->getName());
+        core::stringw display_name = p->getName();
+        
+        // Use demo name if in demo mode and available
+        if (UserConfigParams::m_network_demo_mode && !g_network_demo_current_name.empty())
+        {
+            display_name = StringUtils::utf8ToWide(g_network_demo_current_name);
+            Log::info("KartSelection", "Using demo name for display: %s", 
+                      g_network_demo_current_name.c_str());
+        }
+        
+        newPlayerWidget->getPlayerNameSpinner()->setCustomText(display_name);
     }
 
     // ---- Divide screen space among all karts

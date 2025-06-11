@@ -226,10 +226,10 @@ void NetworkingLobby::init()
     m_emoji_button->setText(L"\u263A");
 
     // Connect to server now if we have saved players and not disconnected
-    // But skip auto-connect in demo mode since we need to prompt for name first
+    // Skip auto-connect in demo mode only if we don't have a demo name yet
     if (!LobbyProtocol::get<LobbyProtocol>() &&
         !NetworkConfig::get()->getNetworkPlayers().empty() &&
-        !UserConfigParams::m_network_demo_mode)
+        (!UserConfigParams::m_network_demo_mode || !g_network_demo_current_name.empty()))
         std::make_shared<ConnectToServer>(m_joined_server)->requestStart();
 
     // Check if we need demo name prompt when returning to lobby

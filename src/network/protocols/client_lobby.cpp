@@ -69,6 +69,8 @@
 #include "states_screens/online/networking_lobby.hpp"
 #include "states_screens/online/network_kart_selection.hpp"
 #include "states_screens/online/tracks_screen.hpp"
+#include "states_screens/main_menu_screen.hpp"
+#include "network/protocols/connect_to_server.hpp"
 #include "tracks/track.hpp"
 #include "tracks/track_manager.hpp"
 #include "utils/log.hpp"
@@ -469,6 +471,13 @@ void ClientLobby::update(int ticks)
 #endif
                 name += core::stringw(" ") + StringUtils::toWString(i + 1);
             }
+            else if (UserConfigParams::m_network_demo_mode && !g_network_demo_current_name.empty())
+            {
+                // Use demo name if in demo mode and name has been entered
+                name = StringUtils::utf8ToWide(g_network_demo_current_name);
+                Log::info("ClientLobby", "Using demo name for player %d: %s", 
+                          i, g_network_demo_current_name.c_str());
+            }
             rest->encodeString(name).
                 addFloat(player->getDefaultKartColor());
             // Per-player handicap
@@ -512,28 +521,54 @@ void ClientLobby::update(int ticks)
                 g_network_demo_current_name.empty() &&
                 !GUIEngine::ModalDialog::isADialogActive())
             {
-                Log::info("ClientLobby", "Auto-timeout triggered in demo mode - showing name prompt");
+                Log::info("ClientLobby", "Auto-timeout: implementing clean disconnect-reconnect flow");
                 
-                // Set up callbacks for the network name screen
+                // Store server info for reconnection
+                std::shared_ptr<Server> stored_server = m_server;
+                Log::info("ClientLobby", "Stored server info: %s", 
+                          stored_server ? StringUtils::wideToUtf8(stored_server->getName()).c_str() : "null");
+                
+                // STEP 1: DISCONNECT completely first
+                Log::info("ClientLobby", "STEP 1: Disconnecting from server (auto-timeout)");
+                STKHost::get()->disconnectAllPeers(false/*timeout_waiting*/);
+                STKHost::get()->requestShutdown();
+                
+                // STEP 2: Set up name screen callbacks
                 NetworkNameScreen::getInstance()->setCallbacks(
-                    [this](const core::stringw& name) {
-                        Log::info("ClientLobby", "Demo name entered via auto-timeout: %s", 
+                    [stored_server](const core::stringw& name) {
+                        Log::info("ClientLobby", "STEP 3: Name entered: %s - starting fresh connection (auto-timeout)", 
                                   StringUtils::wideToUtf8(name).c_str());
-                        // Update player name using the proper method
-                        updatePlayerName(0, name); // Use kart_id 0 for demo mode
-                        // Now proceed with returning to lobby
-                        doneWithResults();
+                        
+                        // Store the demo name
+                        g_network_demo_current_name = StringUtils::wideToUtf8(name);
+                        
+                        if (stored_server)
+                        {
+                            Log::info("ClientLobby", "Starting fresh connection to: %s", 
+                                      StringUtils::wideToUtf8(stored_server->getName()).c_str());
+                            
+                            // Set server for networking lobby
+                            NetworkingLobby::getInstance()->setJoinedServer(stored_server);
+                            
+                            // Go to networking lobby for fresh connection
+                            StateManager::get()->resetAndGoToScreen(NetworkingLobby::getInstance());
+                        }
+                        else
+                        {
+                            Log::error("ClientLobby", "No server stored - going to main menu");
+                            StateManager::get()->resetAndGoToScreen(MainMenuScreen::getInstance());
+                        }
                     },
-                    [this]() {
-                        Log::info("ClientLobby", "Demo name prompt cancelled via auto-timeout");
-                        // Still return to lobby even if cancelled
-                        doneWithResults();
+                    []() {
+                        Log::info("ClientLobby", "Demo name cancelled (auto-timeout) - going to main menu");
+                        StateManager::get()->resetAndGoToScreen(MainMenuScreen::getInstance());
                     }
                 );
                 
-                // Push the network name screen
-                NetworkNameScreen::getInstance()->setPreviousScreen(L"ClientLobby");
-                StateManager::get()->pushScreen(NetworkNameScreen::getInstance());
+                // STEP 2: Show name screen (while disconnected)
+                Log::info("ClientLobby", "STEP 2: Showing name screen (disconnected, auto-timeout)");
+                NetworkNameScreen::getInstance()->setPreviousScreen(L"");
+                StateManager::get()->replaceTopMostScreen(NetworkNameScreen::getInstance());
             }
             else
             {
@@ -1252,12 +1287,7 @@ void ClientLobby::raceFinished(Event* event)
 void ClientLobby::backToLobby(Event *event)
 {
     // In case the user opened a user info dialog
-    // Don't dismiss NetworkNameDialog - let it complete naturally
-    GUIEngine::ModalDialog* current_dialog = GUIEngine::ModalDialog::getCurrent();
-    if (current_dialog && dynamic_cast<NetworkNameDialog*>(current_dialog) == nullptr)
-    {
-        GUIEngine::ModalDialog::dismiss();
-    }
+    GUIEngine::ModalDialog::dismiss();
     GUIEngine::ScreenKeyboard::dismiss();
 
     NetworkConfig::get()->clearActivePlayersForClient();
