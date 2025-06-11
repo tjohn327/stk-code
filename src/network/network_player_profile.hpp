@@ -128,6 +128,10 @@ public:
         m_kart_name = kart_name;
         m_kart_data = KartData();
     }
+    void setPlayerName(const irr::core::stringw &name)
+    {
+        m_player_name = name;
+    }
     // ------------------------------------------------------------------------
     /** Returns the name of the kart this player has selected. */
     const std::string &getKartName() const              { return m_kart_name; }

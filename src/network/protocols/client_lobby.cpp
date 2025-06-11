@@ -22,6 +22,8 @@
 #include "audio/music_manager.hpp"
 #include "audio/sfx_manager.hpp"
 #include "states_screens/dialogs/network_name_dialog.hpp"
+#include "states_screens/network_name_screen.hpp"
+#include "states_screens/state_manager.hpp"
 #include "utils/string_utils.hpp"
 #include "config/user_config.hpp"
 #include "config/player_manager.hpp"
@@ -511,18 +513,27 @@ void ClientLobby::update(int ticks)
                 !GUIEngine::ModalDialog::isADialogActive())
             {
                 Log::info("ClientLobby", "Auto-timeout triggered in demo mode - showing name prompt");
-                new NetworkNameDialog([this](const core::stringw& name) {
-                    // Store the new demo name
-                    g_network_demo_current_name = StringUtils::wideToUtf8(name);
-                    Log::info("ClientLobby", "Demo name entered via auto-timeout: %s", 
-                              g_network_demo_current_name.c_str());
-                    // Now proceed with returning to lobby
-                    doneWithResults();
-                }, [this]() {
-                    Log::info("ClientLobby", "Demo name prompt cancelled via auto-timeout");
-                    // Still return to lobby even if cancelled
-                    doneWithResults();
-                });
+                
+                // Set up callbacks for the network name screen
+                NetworkNameScreen::getInstance()->setCallbacks(
+                    [this](const core::stringw& name) {
+                        Log::info("ClientLobby", "Demo name entered via auto-timeout: %s", 
+                                  StringUtils::wideToUtf8(name).c_str());
+                        // Update player name using the proper method
+                        updatePlayerName(0, name); // Use kart_id 0 for demo mode
+                        // Now proceed with returning to lobby
+                        doneWithResults();
+                    },
+                    [this]() {
+                        Log::info("ClientLobby", "Demo name prompt cancelled via auto-timeout");
+                        // Still return to lobby even if cancelled
+                        doneWithResults();
+                    }
+                );
+                
+                // Push the network name screen
+                NetworkNameScreen::getInstance()->setPreviousScreen(L"ClientLobby");
+                StateManager::get()->pushScreen(NetworkNameScreen::getInstance());
             }
             else
             {
@@ -1241,7 +1252,12 @@ void ClientLobby::raceFinished(Event* event)
 void ClientLobby::backToLobby(Event *event)
 {
     // In case the user opened a user info dialog
-    GUIEngine::ModalDialog::dismiss();
+    // Don't dismiss NetworkNameDialog - let it complete naturally
+    GUIEngine::ModalDialog* current_dialog = GUIEngine::ModalDialog::getCurrent();
+    if (current_dialog && dynamic_cast<NetworkNameDialog*>(current_dialog) == nullptr)
+    {
+        GUIEngine::ModalDialog::dismiss();
+    }
     GUIEngine::ScreenKeyboard::dismiss();
 
     NetworkConfig::get()->clearActivePlayersForClient();
@@ -1422,8 +1438,27 @@ void ClientLobby::requestKartInfo(uint8_t kart_id)
 //-----------------------------------------------------------------------------
 void ClientLobby::updatePlayerName(uint8_t kart_id, const irr::core::stringw& new_name)
 {
-    // This method is no longer used - we use global storage instead
-    Log::info("ClientLobby", "updatePlayerName called but using global storage approach instead");
+    Log::info("ClientLobby", "Updating player name for kart_id %d to: %s", 
+              kart_id, StringUtils::wideToUtf8(new_name).c_str());
+    
+    // Store the demo name locally for use during this session
+    if (UserConfigParams::m_network_demo_mode)
+    {
+        g_network_demo_current_name = StringUtils::wideToUtf8(new_name);
+        Log::info("ClientLobby", "Stored demo name locally: %s", 
+                  g_network_demo_current_name.c_str());
+    }
+    
+    // Send demo name to server for race result storage
+    NetworkString* demo_name_msg = getNetworkString(1 + new_name.size() * 4);
+    demo_name_msg->setSynchronous(true);
+    demo_name_msg->addUInt8(LobbyProtocol::LE_DEMO_NAME);
+    demo_name_msg->encodeString(new_name);
+    sendToServer(demo_name_msg, true);
+    delete demo_name_msg;
+    
+    Log::info("ClientLobby", "Sent demo name update to server: %s", 
+              StringUtils::wideToUtf8(new_name).c_str());
 }   // updatePlayerName
 
 //-----------------------------------------------------------------------------

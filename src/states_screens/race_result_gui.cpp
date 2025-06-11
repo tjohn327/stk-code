@@ -22,6 +22,8 @@
 #include "audio/sfx_manager.hpp"
 #include "audio/sfx_base.hpp"
 #include "states_screens/dialogs/network_name_dialog.hpp"
+#include "states_screens/network_name_screen.hpp"
+#include "states_screens/state_manager.hpp"
 #include "utils/string_utils.hpp"
 #include "network/network_string.hpp"
 #include "network/protocol.hpp"
@@ -460,35 +462,38 @@ void RaceResultGUI::eventCallback(GUIEngine::Widget* widget,
                     !GUIEngine::ModalDialog::isADialogActive())
                 {
                     Log::info("RaceResultGUI", "Demo mode active and name cleared - showing name prompt");
-                    new NetworkNameDialog([this](const core::stringw& name) {
-                        // Store the new demo name locally
-                        g_network_demo_current_name = StringUtils::wideToUtf8(name);
-                        Log::info("RaceResultGUI", "New demo name entered: %s", 
-                                  g_network_demo_current_name.c_str());
-                        
-                        // Send demo name to server for race result storage
-                        NetworkString* demo_name_msg = new NetworkString(PROTOCOL_LOBBY_ROOM, 1 + name.size() * 4);
-                        demo_name_msg->setSynchronous(true);
-                        demo_name_msg->addUInt8(LobbyProtocol::LE_DEMO_NAME);
-                        demo_name_msg->encodeString(name);
-                        STKHost::get()->sendToServer(demo_name_msg, true);
-                        delete demo_name_msg;
-                        Log::info("RaceResultGUI", "Sent demo name to server: %s", 
-                                  g_network_demo_current_name.c_str());
-                        
-                        // Now signal to server that we're back in lobby
-                        auto cl = LobbyProtocol::get<ClientLobby>();
-                        if (cl)
-                            cl->doneWithResults();
-                        getWidget<GUIEngine::IconButtonWidget>("right")->setLabel(_("Waiting for others"));
-                    }, [this]() {
-                        Log::info("RaceResultGUI", "Demo name prompt cancelled");
-                        // Still return to lobby even if cancelled
-                        auto cl = LobbyProtocol::get<ClientLobby>();
-                        if (cl)
-                            cl->doneWithResults();
-                        getWidget<GUIEngine::IconButtonWidget>("right")->setLabel(_("Waiting for others"));
-                    });
+                    
+                    // Set up callbacks for the network name screen
+                    NetworkNameScreen::getInstance()->setCallbacks(
+                        [this](const core::stringw& name) {
+                            Log::info("RaceResultGUI", "New demo name entered: %s", 
+                                      StringUtils::wideToUtf8(name).c_str());
+                            
+                            // Update player name using the proper method
+                            auto cl = LobbyProtocol::get<ClientLobby>();
+                            if (cl)
+                            {
+                                cl->updatePlayerName(0, name); // Use kart_id 0 for demo mode
+                            }
+                            
+                            // Now signal to server that we're back in lobby
+                            if (cl)
+                                cl->doneWithResults();
+                            getWidget<GUIEngine::IconButtonWidget>("right")->setLabel(_("Waiting for others"));
+                        },
+                        [this]() {
+                            Log::info("RaceResultGUI", "Demo name prompt cancelled");
+                            // Still return to lobby even if cancelled
+                            auto cl = LobbyProtocol::get<ClientLobby>();
+                            if (cl)
+                                cl->doneWithResults();
+                            getWidget<GUIEngine::IconButtonWidget>("right")->setLabel(_("Waiting for others"));
+                        }
+                    );
+                    
+                    // Push the network name screen
+                    NetworkNameScreen::getInstance()->setPreviousScreen(L"RaceResultGUI");
+                    StateManager::get()->pushScreen(NetworkNameScreen::getInstance());
                 }
                 else
                 {

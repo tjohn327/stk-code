@@ -15,98 +15,91 @@
 //  along with this program; if not, write to the Free Software
 //  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
-#include "states_screens/dialogs/network_name_dialog.hpp"
+#include "states_screens/network_name_screen.hpp"
 
 #include "guiengine/engine.hpp"
-#include "guiengine/widgets/icon_button_widget.hpp"
+#include "guiengine/widgets/button_widget.hpp"
 #include "guiengine/widgets/label_widget.hpp"
-#include "guiengine/widgets/ribbon_widget.hpp"
 #include "guiengine/widgets/text_box_widget.hpp"
 #include "states_screens/state_manager.hpp"
+#include "states_screens/main_menu_screen.hpp"
 #include "utils/string_utils.hpp"
 #include "utils/translation.hpp"
-
-#include <IGUIEnvironment.h>
 
 using namespace GUIEngine;
 using namespace irr::core;
 
-// -----------------------------------------------------------------------------
-NetworkNameDialog::NetworkNameDialog(NameEnteredCallback name_cb, CancelCallback cancel_cb)
-                  : ModalDialog(0.95f, 0.6f, GUIEngine::MODAL_DIALOG_LOCATION_CENTER),
-                    m_name_cb(name_cb), m_cancel_cb(cancel_cb), m_self_destroy(false)
-{
-    loadFromFile("network_name_dialog.stkgui");
 
+// -----------------------------------------------------------------------------
+NetworkNameScreen::NetworkNameScreen() : Screen("network_name_screen.stkgui")
+{
+}
+
+// -----------------------------------------------------------------------------
+void NetworkNameScreen::loadedFromFile()
+{
     m_text_field = getWidget<TextBoxWidget>("textfield");
     assert(m_text_field != NULL);
-    m_text_field->setFocusForPlayer(PLAYER_ID_GAME_MASTER);
 
     m_title = getWidget<LabelWidget>("title");
     assert(m_title != NULL);
     
     m_subtitle = getWidget<LabelWidget>("subtitle");
     assert(m_subtitle != NULL);
+}
+
+// -----------------------------------------------------------------------------
+void NetworkNameScreen::init()
+{
+    Screen::init();
     
-    // Set default placeholder text
+    // Set focus to the text field
+    m_text_field->setFocusForPlayer(PLAYER_ID_GAME_MASTER);
     m_text_field->setText(L"");
-}
-
-// -----------------------------------------------------------------------------
-NetworkNameDialog::~NetworkNameDialog()
-{
-    m_text_field->getIrrlichtElement()->remove();
-    m_text_field->clearListeners();
-}
-
-// -----------------------------------------------------------------------------
-GUIEngine::EventPropagation NetworkNameDialog::processEvent(const std::string& eventSource)
-{ 
-    GUIEngine::RibbonWidget* buttons_ribbon =
-        getWidget<GUIEngine::RibbonWidget>("buttons");
     
-    if(eventSource == "buttons")
-    {
-        const std::string& button =
-            buttons_ribbon->getSelectionIDString(PLAYER_ID_GAME_MASTER);
-
-        if (button == "cancel")
-        {
-            if (m_cancel_cb)
-                m_cancel_cb();
-            dismiss();
-            return GUIEngine::EVENT_BLOCK;
-        }
-        else if (button == "ok")
-        {
-            if (!m_self_destroy && validateAndSubmit())
-                m_self_destroy = true;
-            return GUIEngine::EVENT_BLOCK;
-        }
-    }
-    return GUIEngine::EVENT_LET;
+    // Reset title text in case it was changed for error display
+    m_title->setText(_("Enter Your Name"), false);
 }
 
 // -----------------------------------------------------------------------------
-void NetworkNameDialog::onEnterPressedInternal()
+void NetworkNameScreen::tearDown()
 {
-    // Cancel button pressed
-    IconButtonWidget* cancel_button = getWidget<IconButtonWidget>("cancel");
-    if (GUIEngine::isFocusedForPlayer(cancel_button, PLAYER_ID_GAME_MASTER))
+    Screen::tearDown();
+}
+
+// -----------------------------------------------------------------------------
+void NetworkNameScreen::eventCallback(GUIEngine::Widget* widget, const std::string& name,
+                                       const int playerID)
+{
+    if (name == "cancel")
     {
         if (m_cancel_cb)
             m_cancel_cb();
-        dismiss();
-        return;
+        
+        // Go back to previous screen or main menu
+        if (!m_previous_screen_name.empty())
+            StateManager::get()->escapePressed();
+        else
+            StateManager::get()->replaceTopMostScreen(MainMenuScreen::getInstance());
     }
-
-    // Enter pressed in text field or OK button focused
-    if (!m_self_destroy && validateAndSubmit())
-        m_self_destroy = true;
+    else if (name == "ok")
+    {
+        validateAndSubmit();
+    }
 }
 
 // -----------------------------------------------------------------------------
-bool NetworkNameDialog::validateAndSubmit()
+bool NetworkNameScreen::onEscapePressed()
+{
+    // Same as cancel button
+    if (m_cancel_cb)
+        m_cancel_cb();
+    
+    return true; // Handle the escape
+}
+
+// -----------------------------------------------------------------------------
+bool NetworkNameScreen::validateAndSubmit()
 {
     stringw name = m_text_field->getText().trim();
     
@@ -129,22 +122,24 @@ bool NetworkNameDialog::validateAndSubmit()
     if (m_name_cb)
         m_name_cb(name);
     
+    // Go back to previous screen or main menu
+    if (!m_previous_screen_name.empty())
+        StateManager::get()->escapePressed();
+    else
+        StateManager::get()->replaceTopMostScreen(MainMenuScreen::getInstance());
+    
     return true;
 }
 
 // -----------------------------------------------------------------------------
-void NetworkNameDialog::onUpdate(float dt)
+void NetworkNameScreen::setCallbacks(NameEnteredCallback name_cb, CancelCallback cancel_cb)
 {
-    // It's unsafe to delete from inside the event handler so we do it here
-    if (m_self_destroy)
-    {
-        // irrLicht is too stupid to remove focus from deleted widgets
-        // so do it by hand
-        GUIEngine::getGUIEnv()
-            ->removeFocus(m_text_field->getIrrlichtElement());
-        GUIEngine::getGUIEnv()->removeFocus(m_irrlicht_window);
+    m_name_cb = name_cb;
+    m_cancel_cb = cancel_cb;
+}
 
-        // Dismiss the dialog - callback was already called in validateAndSubmit
-        ModalDialog::dismiss();
-    }
+// -----------------------------------------------------------------------------
+void NetworkNameScreen::setPreviousScreen(const irr::core::stringw& screen_name)
+{
+    m_previous_screen_name = screen_name;
 }

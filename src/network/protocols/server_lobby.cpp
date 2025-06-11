@@ -2359,12 +2359,7 @@ void ServerLobby::checkRaceFinished()
     // Store race results if database is configured (regardless of ranked mode)
     // In demo mode, delay storage until new name is received
     if (UserConfigParams::m_network_demo_mode)
-    {
-        Log::info("ServerLobby", "Demo mode: deferring race result storage until new name received");
-        m_race_results_stored = false;
-    }
-    else
-    {
+    {        
         storeRaceResults();
         m_race_results_stored = true;
     }
