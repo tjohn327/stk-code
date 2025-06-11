@@ -27,7 +27,6 @@
 #include "states_screens/main_menu_screen.hpp"
 #include "states_screens/online/networking_lobby.hpp"
 #include "network/protocols/connect_to_server.hpp"
-#include "network/demo_mode_manager.hpp"
 #include "network/server.hpp"
 #include "utils/string_utils.hpp"
 #include "network/network_string.hpp"
@@ -445,11 +444,43 @@ void RaceResultGUI::eventCallback(GUIEngine::Widget* widget,
             {
                 Log::info("RaceResultGUI", "Continue button pressed");
                 
-                // Check if demo mode needs to handle this
-                DemoModeManager::get()->handleRaceEndContinue();
-                
-                // If demo mode didn't handle it, proceed with normal flow
-                if (!DemoModeManager::get()->isDemoFlowActive())
+                // Handle demo mode: clear demo name and go to networking lobby
+                // which will detect the demo mode and show name prompt
+                if (UserConfigParams::m_network_demo_mode)
+                {
+                    Log::info("RaceResultGUI", "Demo mode: clearing demo name and returning to lobby");
+                    g_network_demo_current_name.clear();
+
+                    // Store current server for networking lobby
+                    bool was_lan = NetworkConfig::get()->isLAN();
+                    auto cl = LobbyProtocol::get<ClientLobby>();
+                    std::shared_ptr<Server> server;
+                    if (cl)
+                    {
+                        cl->doneWithResults();
+                        server = cl->getJoinedServer();
+                    }
+                    
+                    RaceManager::get()->clearNetworkGrandPrixResult();
+                    if (STKHost::existHost())
+                    {
+                        STKHost::get()->shutdown();
+                    }
+                    RaceManager::get()->exitRace();
+                    RaceManager::get()->setAIKartOverride("");
+                    if (server)
+                    {
+                        if (was_lan)
+                            NetworkConfig::get()->setIsLAN();
+                        STKHost::create();
+                        NetworkingLobby::getInstance()->setJoinedServer(server);
+                        StateManager::get()->replaceTopMostScreen(NetworkingLobby::getInstance());
+                        return;
+                    }
+                    Log::error("RaceResultGUI", "Demo mode: No server found, going to main menu");
+                    StateManager::get()->resetAndGoToScreen(MainMenuScreen::getInstance());
+                }
+                else
                 {
                     Log::info("RaceResultGUI", "Normal flow - signaling completion to server");
                     auto cl = LobbyProtocol::get<ClientLobby>();
