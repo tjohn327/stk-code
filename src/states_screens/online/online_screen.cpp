@@ -239,7 +239,7 @@ void OnlineScreen::onUpdate(float delta)
     m_online->setLabel(PlayerManager::getCurrentOnlineId() ? m_online_string
                                                            : m_login_string);
     // In case for entering server address finished
-    if (m_entered_server)
+    if (m_entered_server && !m_waiting_for_demo_name)
     {
         NetworkConfig::get()->setIsLAN();
         NetworkConfig::get()->setIsServer(false);
@@ -247,12 +247,8 @@ void OnlineScreen::onUpdate(float delta)
         STKHost::create();
         NetworkingLobby::getInstance()->setJoinedServer(m_entered_server);
         m_entered_server = nullptr;
-     //   StateManager::get()->resetAndSetStack(
-     //       NetworkConfig::get()->getResetScreens(true/*lobby*/).data());
-    }
-
-    if (m_entered_server && !m_waiting_for_demo_name)
-    {
+        StateManager::get()->resetAndSetStack(
+            NetworkConfig::get()->getResetScreens(true/*lobby*/).data());
         Log::info("OnlineScreen", "Demo mode enabled: %s", 
                   UserConfigParams::m_network_demo_mode ? "true" : "false");
         
@@ -392,12 +388,6 @@ bool OnlineScreen::onEscapePressed()
 // ----------------------------------------------------------------------------
 void OnlineScreen::proceedWithConnection()
 {
-    NetworkConfig::get()->setIsLAN();
-    NetworkConfig::get()->setIsServer(false);
-    ServerConfig::m_private_server_password = "";
-    STKHost::create();
-    NetworkingLobby::getInstance()->setJoinedServer(m_entered_server);
-    m_entered_server = nullptr;
     StateManager::get()->resetAndSetStack(
         NetworkConfig::get()->getResetScreens(true/*lobby*/).data());
 }   // proceedWithConnection
