@@ -2377,6 +2377,7 @@ void ServerLobby::checkRaceFinished()
  */
 void ServerLobby::storeRaceResults()
 {
+#ifdef ENABLE_SQLITE3
     // No storage for battle mode
     if (!RaceManager::get()->modeHasLaps())
         return;
@@ -2466,6 +2467,7 @@ void ServerLobby::storeRaceResults()
         Log::info("ServerLobby", "No database or table - skipping race result storage");
         Log::info("ServerLobby", "=== RACE RESULT STORAGE END ===");
     }
+#endif
 }   // storeRaceResults
 
 //-----------------------------------------------------------------------------
